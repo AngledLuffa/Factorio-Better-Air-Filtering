@@ -170,91 +170,11 @@ function stepsToOrigin(x, y)
     return steps
 end
 
-function suctionUpdateChunk(chunkTo, dx, dy)
-    local totalSuction = chunkTo:getTotalSuctionRate(manhattan(dx, dy))
-
-    if totalSuction == 0 then
-        return
-    end
-
-    --    game.print("From " .. dx .. ", " .. dy)
-    --    game.print("suction: " .. totalSuction)
-
-    local surface = chunkTo.surface
-    -- get_pollution can handle indexed x, y as well as named x, y
-    local position = { (chunkTo.x + dx) * 32, (chunkTo.y + dy) * 32 }
-
-    local pollution = surface.get_pollution(position)
-    if pollution > 0.1 then
-        local toPollute = math.min(pollution, totalSuction)
-        -- first, unpollute the chunkFrom
-        surface.pollute(position, -toPollute)
-        --game.print("Moving " .. toPollute .. " pollution")
-        --game.print("From: " .. position[1] .. ", " .. position[2] .. " (" .. toPollute .. ")")
-
-        local steps = stepsToOrigin(dx, dy)
-        toPollute = toPollute / #steps
-        for _, step in pairs(steps) do
-            position[1] = (chunkTo.x + step[1]) * 32
-            position[2] = (chunkTo.y + step[2]) * 32
-            surface.pollute(position, toPollute)
-            --game.print("To: " .. position[1] .. ", " .. position[2] .. " (" .. toPollute .. ")")
-        end
-    end
-end
-
-function generateSuctionFunction(dx, dy)
-
-    local function suctionUpdate(event)
-        --        game.print("suck pollution " .. dx .. ", " .. dy)
-        for _, chunkTo in pairs(air_filtered_chunks) do
-            suctionUpdateChunk(chunkTo, dx, dy)
-        end
-    end
-
-    return suctionUpdate
-end
-
-function generateRadiusCoordinates(radius)
-    local coords = {}
-    for signR = -1, 1, 2 do
-        for signX = -1, 1, 2 do
-            for dx = -radius, radius do
-                if not (sign(signX) * sign(dx) == signR) then
-                    if not (math.abs(dx) == radius and signR == 1) then
-                        local dy = (signR * radius) + (signX * dx)
-                        table.insert(coords, { dx = dx, dy = dy })
-                    end
-                end
-            end
-        end
-    end
-    return coords
-end
-
-function generateRadiusSuctionFunctions(radius)
-    local functions = {}
-
-    for _, offset in pairs(generateRadiusCoordinates(radius)) do
-        local f = generateSuctionFunction(offset.dx, offset.dy)
-        table.insert(functions, f)
-    end
-
-    return functions
-end
-
 function generateFunctions()
     local functions = {}
 
-    table.insert(functions, absorbPollution)
-
-    for radius = 1, 4 do
-        for _, f in pairs(generateRadiusSuctionFunctions(radius)) do
-            table.insert(functions, f)
-        end
-    end
-
-    --table.insert(functions, updateInserters)
+    -- TODO: split the unpollute chunks into different buckets
+    table.insert(functions, unpollute)
 
     return functions
 end
@@ -390,15 +310,13 @@ function FilteredChunk:removeFromMap()
     --end
 end
 
-function FilteredChunk:getTotalSuctionRate(distance)
-    local totalSuctionRate = 0.0
+function FilteredChunk:getTotalAbsorptionRate()
+    local totalAbsorptionRate = 0.0
     for _, filter in pairs(self:getFilters()) do
-        if inRadius(filter, distance) then
-            local suctionRate = getSuctionRate(filter)
-            totalSuctionRate = totalSuctionRate + suctionRate
-        end
+        local absorptionRate = getAbsorptionRate(filter)
+        totalAbsorptionRate = totalAbsorptionRate + absorptionRate
     end
-    return totalSuctionRate * (1 / 4) ^ distance
+    return totalAbsorptionRate
 end
 
 function FilteredChunk:toPosition()
@@ -444,7 +362,67 @@ function getFilteredChunk(surface, x, y)
     return createFilteredChunk(surface, x, y)
 end
 
+function absorb_pollution(toAbsorb, filters, totalAbsorptionRate)
+    local totalInsertedAmount = 0.0
+    for _, filter in pairs(filters) do
+        local toInsert = (getAbsorptionRate(filter) / totalAbsorptionRate) * toAbsorb
+        if toInsert > 0 then
+            local insertedAmount = filter.insert_fluid({ name = "pollution", amount = toInsert })
+            game.pollution_statistics.on_flow(filter.name, -insertedAmount)
+            totalInsertedAmount = totalInsertedAmount + insertedAmount
+        end
+    end
 
+    if math.abs(toAbsorb - totalInsertedAmount) > 0.01 then
+        game.print("Error with inserting pollution in air filter machine. Different amounts absorbed/inserted: " .. toAbsorb .. " absorbed and " .. totalInsertedAmount .. " inserted.")
+    end
+end
+
+function unpollute_single_chunk(surface, x, y, absorptionRate)
+    local toAbsorb = math.min(surface.get_pollution({ x = x, y = y }), absorptionRate)
+    surface.pollute({ x = x, y = y }, -toAbsorb)
+    return toAbsorb
+end
+
+function unpollute_chunk(chunk)
+    local totalAbsorptionRate = chunk:getTotalAbsorptionRate()
+
+    if totalAbsorptionRate == 0 then
+        return
+    end
+
+    local surface = chunk.surface
+    local x = chunk.x
+    local y = chunk.y
+
+    local filters = chunk:getFilters()
+
+    local toAbsorb = unpollute_single_chunk(surface, x, y, totalAbsorptionRate)
+    absorb_pollution(toAbsorb, filters, totalAbsorptionRate)
+
+    -- TODO: absorb neighbors
+    -- toAbsorb = 0
+    -- local neighborAbsorption = totalAbsorptionRate / 4
+    -- toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 32, y, neighborAbsorption)
+    -- toAbsorb = toAbsorb + unpollute_single_chunk(surface, x, y - 32, neighborAbsorption)
+    -- toAbsorb = toAbsorb + unpollute_single_chunk(surface, x + 32, y, neighborAbsorption)
+    -- toAbsorb = toAbsorb + unpollute_single_chunk(surface, x, y + 32, neighborAbsorption)
+    -- absorb_pollution(toAbsorb, filters, totalAbsorptionRate)
+    
+
+    -- TODO: distinguish different filter levels
+end
+
+function unpollute()
+    -- iterate through the list of chunks with filters
+    -- for each such chunk, get the total filter power
+    -- for each neighboring chunk, absorb some pollution
+    -- distribute the pollution back to the filters proportionately
+    local chunk
+    for _, chunk in pairs(air_filtered_chunks) do
+        unpollute_chunk(chunk)
+    end
+end
 
 --  #################
 --  #   callbacks   #
@@ -604,6 +582,8 @@ script.on_event(defines.events.on_runtime_mod_setting_changed, onSettingsChanged
 function setup()
     INTERVAL = settings.global["baf-update-interval"].value
 
+    -- TODO: spread the chunk filtering functions over multiple ticks
+    
     onTick = spreadOverTicks(functions, INTERVAL)
     script.on_event(defines.events.on_tick, onTick)
 end

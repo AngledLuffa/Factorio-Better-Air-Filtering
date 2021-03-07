@@ -40,10 +40,13 @@ end
 
 function getBasePurificationRate(entity)
     -- Depends mostly on recipe (optimal recipe used per machine). Should be multiplied by crafting speed to achieve actual max purification rate
-    if entity.name == "air-filter-machine-1" then
-        return 2 * INTERVAL / 60    -- max pollution cleaning per second among mk1 recipes
-    elseif entity.name == "air-filter-machine-2" or entity.name == "air-filter-machine-3" then
-        return 4 * INTERVAL / 60    -- max pollution cleaning for mk2 and mk3 recipes TODO: change if fluid filtering is implemented
+    if entity.name == "air-filter-machine-1" or entity.name == "air-filter-machine-2" then
+        -- 2/s is the max pollution cleaning per second for mk1 recipes
+        -- mk2 recipes can go twice as fast, but they also absorb from neighboring chunks and get 2x pollution
+        return 2 * INTERVAL / 60
+    elseif entity.name == "air-filter-machine-3" then
+        -- mk3 recipes go at the same speed as mk2 recipes, but absorb from up to 2 chunks away
+        return 1.6 * INTERVAL / 60
     else
         return 0
     end
@@ -93,18 +96,6 @@ function getTotalAbsorptionRate(filters)
         totalAbsorptionRate = totalAbsorptionRate + getAbsorptionRate(filter)
     end
     return totalAbsorptionRate
-end
-
-function inRadius(filter, radius)
-    if filter.name == "air-filter-machine-1" then
-        return radius <= 0
-    elseif filter.name == "air-filter-machine-2" then
-        return radius <= 2
-    elseif filter.name == "air-filter-machine-3" then
-        return radius <= 3
-    else
-        return false
-    end
 end
 
 --  #####################
@@ -362,6 +353,10 @@ function getFilteredChunk(surface, x, y)
     return createFilteredChunk(surface, x, y)
 end
 
+-- ####################
+-- # REMOVE POLLUTION #
+-- ####################
+
 function absorb_pollution(toAbsorb, filters, totalAbsorptionRate)
     local totalInsertedAmount = 0.0
     for _, filter in pairs(filters) do
@@ -400,17 +395,27 @@ function unpollute_chunk(chunk)
     local toAbsorb = unpollute_single_chunk(surface, x, y, totalAbsorptionRate)
     absorb_pollution(toAbsorb, filters, totalAbsorptionRate)
 
-    -- TODO: absorb neighbors
-    -- toAbsorb = 0
-    -- local neighborAbsorption = totalAbsorptionRate / 4
-    -- toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 32, y, neighborAbsorption)
-    -- toAbsorb = toAbsorb + unpollute_single_chunk(surface, x, y - 32, neighborAbsorption)
-    -- toAbsorb = toAbsorb + unpollute_single_chunk(surface, x + 32, y, neighborAbsorption)
-    -- toAbsorb = toAbsorb + unpollute_single_chunk(surface, x, y + 32, neighborAbsorption)
-    -- absorb_pollution(toAbsorb, filters, totalAbsorptionRate)
-    
+    -- absorb neighbors
+    -- TODO: ignore mk1 for this one
+    local neighborAbsorption = chunk:getTotalAbsorptionRate() / 4
+    toAbsorb = 0
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 32, y,      neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x,      y - 32, neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x + 32, y,      neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x,      y + 32, neighborAbsorption)
+    absorb_pollution(toAbsorb, filters, neighborAbsorption * 4)
 
-    -- TODO: distinguish different filter levels
+    local neighborAbsorption = chunk:getTotalAbsorptionRate() / 16
+    toAbsorb = 0
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 64, y,      neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 32, y - 32, neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x,      y - 64, neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x + 32, y - 32, neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x + 64, y,      neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x + 32, y + 32, neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x,      y + 64, neighborAbsorption)
+    toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 32, y + 32, neighborAbsorption)
+    absorb_pollution(toAbsorb, filters, neighborAbsorption * 16)
 end
 
 function unpollute()

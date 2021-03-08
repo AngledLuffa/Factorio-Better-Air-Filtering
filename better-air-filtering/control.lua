@@ -12,7 +12,6 @@ local INTERVAL
 
 local air_filtered_chunks = {}
 
-
 --  #################
 --  #   Utilities   #
 --  #################
@@ -189,6 +188,28 @@ function FilteredChunk:getFilters()
     return filters
 end
 
+function FilteredChunk:getL2Filters()
+    -- returns both L2 and L3 filters
+    local filters = {}
+    for _, filter in pairs(self:getFilters()) do
+        if filter.name ~= "air-filter-machine-1" then
+            table.insert(filters, filter)
+        end
+    end
+    return filters
+end
+
+function FilteredChunk:getL3Filters()
+    -- returns only L3 filters
+    local filters = {}
+    for _, filter in pairs(self:getFilters()) do
+        if filter.name == "air-filter-machine-3" then
+            table.insert(filters, filter)
+        end
+    end
+    return filters
+end
+
 function FilteredChunk:addToMap()
 
     --game.print("Active chunks before: ")
@@ -241,19 +262,6 @@ function FilteredChunk:removeFromMap()
     --for _, c in pairs(air_filtered_chunks) do
     --    game.print(serpent.line(c))
     --end
-end
-
-function FilteredChunk:getTotalAbsorptionRate()
-    local totalAbsorptionRate = 0.0
-    for _, filter in pairs(self:getFilters()) do
-        local absorptionRate = getAbsorptionRate(filter)
-        totalAbsorptionRate = totalAbsorptionRate + absorptionRate
-    end
-    return totalAbsorptionRate
-end
-
-function FilteredChunk:toPosition()
-    return { self.x * 32, self.y * 32 }
 end
 
 function FilteredChunk:addFilter(filter)
@@ -322,7 +330,8 @@ function unpollute_single_chunk(surface, x, y, absorptionRate)
 end
 
 function unpollute_chunk(chunk)
-    local totalAbsorptionRate = chunk:getTotalAbsorptionRate()
+    local filters = chunk:getFilters()
+    local totalAbsorptionRate = getTotalAbsorptionRate(filters)
 
     if totalAbsorptionRate == 0 then
         return
@@ -332,14 +341,12 @@ function unpollute_chunk(chunk)
     local x = chunk.x
     local y = chunk.y
 
-    local filters = chunk:getFilters()
-
     local toAbsorb = unpollute_single_chunk(surface, x, y, totalAbsorptionRate)
     absorb_pollution(toAbsorb, filters, totalAbsorptionRate)
 
     -- absorb neighbors
-    -- TODO: ignore mk1 for this one
-    local neighborAbsorption = chunk:getTotalAbsorptionRate() / 4
+    filters = chunk:getL2Filters()
+    local neighborAbsorption = getTotalAbsorptionRate(filters) / 4
     toAbsorb = 0
     toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 32, y,      neighborAbsorption)
     toAbsorb = toAbsorb + unpollute_single_chunk(surface, x,      y - 32, neighborAbsorption)
@@ -347,7 +354,9 @@ function unpollute_chunk(chunk)
     toAbsorb = toAbsorb + unpollute_single_chunk(surface, x,      y + 32, neighborAbsorption)
     absorb_pollution(toAbsorb, filters, neighborAbsorption * 4)
 
-    local neighborAbsorption = chunk:getTotalAbsorptionRate() / 16
+    -- TODO: maybe it's good enough to let l2 & l3 both do one neighboring tile
+    filters = chunk:getL3Filters()
+    local neighborAbsorption = getTotalAbsorptionRate(filters) / 16
     toAbsorb = 0
     toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 64, y,      neighborAbsorption)
     toAbsorb = toAbsorb + unpollute_single_chunk(surface, x - 32, y - 32, neighborAbsorption)
@@ -491,9 +500,7 @@ end
 
 function load()
     refreshMetatables()
-    if INTERVAL ~= settings.global["baf-update-interval"].value then
-        setup()
-    end
+    setup()
 end
 
 script.on_load(load)

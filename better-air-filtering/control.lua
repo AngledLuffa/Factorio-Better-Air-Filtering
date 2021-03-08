@@ -307,8 +307,12 @@ function absorb_pollution(toAbsorb, filters, totalAbsorptionRate)
 end
 
 function unpollute_single_chunk(surface, x, y, absorptionRate)
-    local toAbsorb = math.min(surface.get_pollution({ x = x, y = y }), absorptionRate)
-    surface.pollute({ x = x, y = y }, -toAbsorb)
+    local position = { x = x, y = y }
+    local toAbsorb = math.min(surface.get_pollution(position), absorptionRate)
+    --if toAbsorb < absorptionRate then
+    --    game.print("Location " .. x .. ", " .. y .. " running out of pollution")
+    --end
+    surface.pollute(position, -toAbsorb)
     return toAbsorb
 end
 

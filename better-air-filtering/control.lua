@@ -11,6 +11,7 @@ local INTERVAL
 --  #####################
 
 local air_filtered_chunks = {}
+local chunk_buckets = {}
 
 --  #################
 --  #   Utilities   #
@@ -97,53 +98,23 @@ function getTotalAbsorptionRate(filters)
     return totalAbsorptionRate
 end
 
+function hashPosition(x, y, buckets)
+    -- hashs a CHUNK x, y to a value
+    -- to hash a player position, divide by 32 first
+    -- https://stackoverflow.com/questions/682438
+    -- returns values between 1 and buckets
+    return bit32.bxor(x * 0x1f1f1f1f, y) % buckets + 1
+end
+
 --  #####################
 --  #   Update script   #
 --  #####################
 
-
-function generateFunctions()
-    local functions = {}
-
-    -- TODO: split the unpollute chunks into different buckets
-    table.insert(functions, unpollute)
-
-    return functions
+function onTick(event)
+    local step = (event.tick % INTERVAL) + 1
+    -- game.print("Unpolluting chunks in bucket " .. step)
+    unpollute(step)
 end
-
-function spreadOverTicks(functions, interval)
-    local tickMap = {}
-    local funcs = {}
-    for index, f in pairs(functions) do
-        -- amount of functions to be inserted in this tick update to fit them all in the remaining interval
-        local functionsPerTick = math.ceil((#functions - index) / (interval - #tickMap - 1))
-        table.insert(funcs, f)
-        if #funcs >= functionsPerTick then
-            table.insert(tickMap, funcs)
-            funcs = {}
-        end
-    end
-    if #funcs > 0 then
-        table.insert(tickMap, funcs)
-        funcs = {}
-    end
-
-    local function onTick(event)
-        local step = (event.tick % interval) + 1
-        local funcs = tickMap[step]
-        if funcs ~= nil then
-            for _, f in pairs(funcs) do
-                f(event)
-            end
-        end
-        --        if step == 1 then
-        --            game.print("================================")
-        --        end
-    end
-
-    return onTick
-end
-
 
 --  #####################
 --  #   FilteredChunk   #
@@ -227,6 +198,9 @@ function FilteredChunk:addToMap()
     global.air_filtered_chunks_map[self.surface.name] = chunkListX
     table.insert(air_filtered_chunks, self)
 
+    local bucket = hashPosition(self.x, self.y, INTERVAL)
+    -- game.print("CHUNK " .. self.x .. ", " .. self.y .. " hashed to " .. bucket)
+    table.insert(chunk_buckets[bucket], self)
 
     --game.print("Active chunks after: ")
     --for i, c in pairs(air_filtered_chunks) do
@@ -236,13 +210,22 @@ function FilteredChunk:addToMap()
 end
 
 function FilteredChunk:removeFromMap()
-    --game.print("Removing chunk from map")
+    --game.print("Removing chunk " .. self.x .. ", " .. self.y .. " from map")
     global.air_filtered_chunks_map[self.surface.name][self.x][self.y] = nil
 
     for i, c in pairs(air_filtered_chunks) do
         if self:equal(c) then
             --game.print("Removing chunk from list")
             table.remove(air_filtered_chunks, i)
+            break
+        end
+    end
+
+    local bucket = hashPosition(self.x, self.y, INTERVAL)
+    for i, c in pairs(chunk_buckets[bucket]) do
+        if self:equal(c) then
+            --game.print("Removing chunk from chunk_bucket " .. bucket)
+            table.remove(chunk_buckets[bucket], i)
             break
         end
     end
@@ -369,13 +352,13 @@ function unpollute_chunk(chunk)
     absorb_pollution(toAbsorb, filters, neighborAbsorption * 16)
 end
 
-function unpollute()
+function unpollute(bucket)
     -- iterate through the list of chunks with filters
     -- for each such chunk, get the total filter power
     -- for each neighboring chunk, absorb some pollution
     -- distribute the pollution back to the filters proportionately
     local chunk
-    for _, chunk in pairs(air_filtered_chunks) do
+    for _, chunk in pairs(chunk_buckets[bucket]) do
         unpollute_chunk(chunk)
     end
 end
@@ -484,9 +467,6 @@ script.on_event({ defines.events.on_player_mined_entity, defines.events.on_robot
 script.on_event({ defines.events.on_pre_player_mined_item, defines.events.on_pre_robot_mined_item, defines.events.on_entity_died }, preEntityRemoved)
 
 
-local functions = generateFunctions()
-
-
 function refreshMetatables()
     for _, chunkListX in pairs(global.air_filtered_chunks_map) do
         for x, chunkListY in pairs(chunkListX) do
@@ -505,10 +485,26 @@ end
 
 script.on_load(load)
 
+function init_chunk_buckets()
+    chunk_buckets = {}
+    for i=1,INTERVAL do
+        table.insert(chunk_buckets, {})
+    end
+end
+
+function build_chunk_buckets()
+    init_chunk_buckets()
+    for _, chunk in pairs(air_filtered_chunks) do
+        local bucket = hashPosition(chunk.x, chunk.y, INTERVAL)
+        table.insert(chunk_buckets[bucket], chunk)
+    end
+end
+
 function init()
     -- gather all filters on every surface
     air_filtered_chunks = {}
     global.air_filtered_chunks_map = {}
+    init_chunk_buckets()
     for _, surface in pairs(game.surfaces) do
         local filters = surface.find_entities_filtered {
             name = { "air-filter-machine-1", "air-filter-machine-2", "air-filter-machine-3" }
@@ -524,6 +520,8 @@ end
 script.on_init(init)
 script.on_configuration_changed(init)
 
+script.on_event(defines.events.on_tick, onTick)
+
 function onSettingsChanged(event)
     if event.setting == "baf-update-interval" then
         setup()
@@ -535,11 +533,7 @@ script.on_event(defines.events.on_runtime_mod_setting_changed, onSettingsChanged
 
 function setup()
     INTERVAL = settings.global["baf-update-interval"].value
-
-    -- TODO: spread the chunk filtering functions over multiple ticks
-    
-    onTick = spreadOverTicks(functions, INTERVAL)
-    script.on_event(defines.events.on_tick, onTick)
+    build_chunk_buckets()
 end
 
 setup()

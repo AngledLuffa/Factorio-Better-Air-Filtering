@@ -120,7 +120,9 @@ function absorbPollution(event)
 end
 
 function absorbChunk(chunk)
-    local chunk_pollution = chunk:get_pollution()
+    local surface = chunk.surface
+    local position = chunk:toPosition()
+    local chunk_pollution = surface.get_pollution(position)
     if chunk_pollution == 0 then
         return
     end
@@ -149,7 +151,7 @@ function absorbChunk(chunk)
             totalInsertedAmount = totalInsertedAmount + insertedAmount
         end
     end
-    chunk:pollute(-totalInsertedAmount)
+    surface.pollute(position, -totalInsertedAmount)
     --    game.print("Total inserted: " .. totalInsertedAmount)
     if math.abs(toAbsorb - totalInsertedAmount) > 0.01 then
         game.print("Error with inserting pollution in air filter machine. Different amounts absorbed/inserted: " .. toAbsorb .. " absorbed and " .. totalInsertedAmount .. " inserted.")
@@ -399,16 +401,8 @@ function FilteredChunk:getTotalSuctionRate(distance)
     return totalSuctionRate * (1 / 4) ^ distance
 end
 
-function FilteredChunk:get_pollution()
-    return self.surface.get_pollution(self:toPosition())
-end
-
-function FilteredChunk:pollute(amount)
-    self.surface.pollute(self:toPosition(), amount)
-end
-
 function FilteredChunk:toPosition()
-    return { x = self.x * 32, y = self.y * 32 }
+    return { self.x * 32, self.y * 32 }
 end
 
 function FilteredChunk:addFilter(filter)

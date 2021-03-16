@@ -271,9 +271,9 @@ function onTick(event)
     -- game.print("Unpolluting chunks in bucket " .. step .. " of " .. INTERVAL .. " buckets")
     absorbPollution(step)
 
-    local suctionStep = event.tick % #suctionFunctions
-    game.print("Also executing suction function " .. suctionStep .. " of " .. #suctionFunctions .. " functions")
-    -- suctionFunctions[suctionStep](event)
+    local suctionStep = (event.tick % #suctionFunctions) + 1
+    -- game.print("Also executing suction function " .. suctionStep .. " of " .. #suctionFunctions .. " functions")
+    suctionFunctions[suctionStep](event)
 end
 
 --  #####################

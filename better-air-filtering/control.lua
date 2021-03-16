@@ -120,7 +120,7 @@ end
 --  #####################
 
 function absorbPollution(step)
-    --    game.print("insertPollution")
+    -- game.print("absorbPollution: step " .. step .. " number of buckets " .. #chunk_buckets[step])
     for _, c in pairs(chunk_buckets[step]) do
         absorbChunk(c)
     end
@@ -555,9 +555,7 @@ end
 
 function load()
     refreshMetatables()
-    if INTERVAL ~= settings.global["baf-update-interval"].value then
-        setup()
-    end
+    setup()
 end
 
 script.on_load(load)
